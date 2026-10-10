@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pinterest Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header"><h2>Pinterest</h2><span class="subtitle">Pin Manager</span></div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="dashboard"><span class="icon">&#9632;</span> Dashboard</a>
+        <a href="#" class="nav-item" data-page="create-post"><span class="icon">&#128204;</span> Buat Pin</a>
+        <a href="#" class="nav-item" data-page="posts"><span class="icon">&#9776;</span> Semua Pin</a>
+        <a href="#" class="nav-item" data-page="insights"><span class="icon">&#9733;</span> Insights</a>
+        <a href="#" class="nav-item" data-page="followers"><span class="icon">&#9823;</span> Followers</a>
+        <a href="#" class="nav-item" data-page="boards"><span class="icon">&#9645;</span> Boards</a>
+        <a href="#" class="nav-item" data-page="mass-upload"><span class="icon">&#8682;</span> Mass Upload</a>
+        <a href="#" class="nav-item" data-page="csv-export"><span class="icon">&#128229;</span> Export CSV</a>
+        <a href="#" class="nav-item" data-page="schedule"><span class="icon">&#128197;</span> Schedule</a>
+        <a href="#" class="nav-item" data-page="settings"><span class="icon">&#9881;</span> Pengaturan</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="page-switcher">
+          <select id="pageSelector" class="form-select" onchange="switchPageAccount(this.value)"><option value="">Loading...</option></select>
+        </div>
+        <div class="account-info"><div class="avatar" id="pageAvatar">?</div><div class="details"><span class="name" id="pageName">Loading...</span><span class="platform">Pinterest Account</span></div></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="menu-toggle" onclick="document.querySelector('.app').classList.toggle('sidebar-open')">&#9776;</button>
+        <h1 id="pageTitle">Dashboard</h1>
+        <div class="topbar-actions">
+          <select id="dateRange" class="form-select"><option value="7">7 Hari</option><option value="30" selected>30 Hari</option><option value="90">90 Hari</option><option value="365">1 Tahun</option></select>
+        </div>
+      </header>
+
+      <div id="accountBanner" class="account-banner" style="display:none">
+        <span class="account-banner-icon">&#9888;</span>
+        <div class="account-banner-text">
+          <strong id="accountBannerTitle">Akun bermasalah</strong>
+          <span id="accountBannerMsg"></span>
+        </div>
+        <a id="accountBannerLink" class="btn btn-sm btn-secondary" style="display:none" target="_blank" rel="noopener">Buka Billing</a>
+        <button class="account-banner-close" type="button" onclick="dismissAccountBanner()" title="Tutup">&#10005;</button>
+      </div>
+
+      <!-- ===== DASHBOARD ===== -->
+      <div class="page active" id="page-dashboard">
+        <div class="kpi-grid">
+          <div class="kpi-card"><div class="kpi-icon" style="background:#e60023">&#9823;</div><div class="kpi-data"><span class="kpi-value" id="kpiFollowers">-</span><span class="kpi-label">Followers</span></div></div>
+          <div class="kpi-card"><div class="kpi-icon" style="background:#5f5f5f">&#128204;</div><div class="kpi-data"><span class="kpi-value" id="kpiPins">-</span><span class="kpi-label">Total Pins</span></div></div>
+          <div class="kpi-card"><div class="kpi-icon" style="background:#00b6bd">&#9645;</div><div class="kpi-data"><span class="kpi-value" id="kpiBoards">-</span><span class="kpi-label">Boards</span></div></div>
+          <div class="kpi-card"><div class="kpi-icon" style="background:#42b72a">&#8593;</div><div class="kpi-data"><span class="kpi-value" id="kpiMonthlyViews">-</span><span class="kpi-label">Monthly Views</span></div></div>
+          <div class="kpi-card"><div class="kpi-icon" style="background:#f7b928">&#9733;</div><div class="kpi-data"><span class="kpi-value" id="kpiSaves">-</span><span class="kpi-label">Saves</span></div></div>
+          <div class="kpi-card"><div class="kpi-icon" style="background:#a855f7">&#9783;</div><div class="kpi-data"><span class="kpi-value" id="kpiImpressions">-</span><span class="kpi-label">Impressions</span></div></div>
+        </div>
+
+        <!-- Calendar -->
+        <div class="section-card">
+          <div class="section-header">
+            <h3>Kalender Pin</h3>
+            <div class="cal-nav">
+              <button class="btn btn-sm btn-secondary" onclick="calPrev()">&#9664;</button>
+              <span id="calMonthLabel" style="font-size:13px;font-weight:600;min-width:140px;text-align:center"></span>
+              <button class="btn btn-sm btn-secondary" onclick="calNext()">&#9654;</button>
+            </div>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
+
+        <div class="charts-row">
+          <div class="chart-card"><h3>Impressions Harian</h3><div class="chart-wrap"><canvas id="chartImpressions"></canvas></div></div>
+          <div class="chart-card"><h3>Saves Harian</h3><div class="chart-wrap"><canvas id="chartSaves"></canvas></div></div>
+          <div class="chart-card"><h3>Outbound Clicks</h3><div class="chart-wrap"><canvas id="chartClicks"></canvas></div></div>
+        </div>
+
+        <div class="section-card">
+          <h3>Pin Terbaik</h3>
+          <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Pin</th><th>Tanggal</th><th>Impressions</th><th>Saves</th><th>Clicks</th><th>Engagement</th></tr></thead>
+            <tbody id="topPostsBody"><tr><td colspan="6" class="loading-cell">Loading...</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- ===== CREATE PIN ===== -->
+      <div class="page" id="page-create-post">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="single">Pin Tunggal</button>
+          <button class="tab-btn" data-tab="bulk">Bulk Pin</button>
+        </div>
+
+        <!-- Single Pin -->
+        <div class="tab-content active" id="tab-single">
+          <div class="form-card">
+            <h3>Buat Pin Baru</h3>
+            <div class="form-grid">
+              <div class="form-group full"><label>Judul Pin (maks 100)</label><input type="text" id="pinTitle" class="form-input" maxlength="100" placeholder="Judul pin..."></div>
+              <div class="form-group full"><label>Deskripsi</label><textarea id="postContent" rows="3" placeholder="Tulis deskripsi pin..."></textarea></div>
+              <div class="form-group"><label>Destinasi Link</label><input type="text" id="pinLink" class="form-input" placeholder="https://..."></div>
+              <div class="form-group"><label>Board Tujuan</label>
+                <select id="pinBoard" class="form-select"><option value="">Board default</option></select>
+              </div>
+              <div class="form-group full"><label>Tipe Media</label>
+                <div class="content-type-tabs">
+                  <button class="ctab active" data-type="image">Gambar</button>
+                  <button class="ctab" data-type="video">Video</button>
+                </div>
+              </div>
+              <div class="form-group full" id="mediaUploadArea">
+                <label>Upload Media (wajib untuk pin)</label>
+                <div class="upload-zone" id="uploadZone">
+                  <div class="upload-icon">&#8682;</div>
+                  <p>Seret & lepas atau <span class="upload-link" onclick="document.getElementById('mediaFileInput').click()">pilih file</span></p>
+                  <small id="uploadHint">Gambar: JPG/PNG/WEBP. Max 25MB</small>
+                  <input type="file" id="mediaFileInput" accept="image/*" style="display:none">
+                </div>
+                <div class="media-preview-list" id="mediaPreviewList"></div>
+                <div class="media-url-input"><label>Atau URL Media</label><input type="text" id="mediaUrl" class="form-input" placeholder="https://..."></div>
+              </div>
+              <div class="form-group full"><label>Alt Text (maks 500)</label><input type="text" id="pinAltText" class="form-input" maxlength="500" placeholder="Deskripsi aksesibilitas gambar (opsional)"></div>
+              <div class="form-group"><label>Jadwalkan</label><input type="datetime-local" id="postSchedule" class="form-input"></div>
+              <div class="form-group"><label>Atau</label><button class="btn btn-primary" id="btnPublishNow" style="width:100%;margin-top:2px">Publish Sekarang</button></div>
+              <div class="form-group full"><label><input type="checkbox" id="postAsDraft"> Simpan sebagai Draft</label></div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-secondary" onclick="resetPostForm()">Reset</button>
+              <button class="btn btn-primary" id="btnSubmitPost">Kirim Pin</button>
+            </div>
+            <div id="postResult" class="result-box" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- Bulk Pin -->
+        <div class="tab-content" id="tab-bulk">
+          <div class="form-card">
+            <h3>Bulk Pin</h3>
+            <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+              Pilih folder yang berisi sub-folder. Setiap sub-folder = 1 pin. Di dalam sub-folder harus ada file media (gambar/video) + <code>caption.txt</code>.
+            </p>
+            <div class="upload-zone" id="bulkUploadZone">
+              <div class="upload-icon">&#128193;</div>
+              <p>Klik untuk pilih folder atau <span class="upload-link" onclick="document.getElementById('bulkFolderInput').click()">browse</span></p>
+              <small>Format: folder/subfolder/media + caption.txt</small>
+              <input type="file" id="bulkFolderInput" webkitdirectory multiple style="display:none">
+            </div>
+
+            <div id="bulkPreview" style="display:none;margin-top:16px">
+              <div class="section-header"><h3 id="bulkCount" style="font-size:14px">0 pin ditemukan</h3></div>
+              <div id="bulkItems" class="bulk-items"></div>
+              <div class="form-grid" style="margin-top:14px">
+                <div class="form-group"><label>Board Tujuan</label>
+                  <select id="bulkBoard" class="form-select"><option value="">Board default</option></select>
+                </div>
+                <div class="form-group"><label>Jadwalkan Semua Mulai</label><input type="datetime-local" id="bulkScheduleStart" class="form-input"></div>
+                <div class="form-group"><label>Interval (menit)</label><input type="number" id="bulkInterval" class="form-input" value="30" min="5"></div>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-secondary" onclick="clearBulk()">Bersihkan</button>
+                <button class="btn btn-primary" id="btnBulkSubmit">Kirim Semua (0)</button>
+              </div>
+              <div id="bulkResult" class="result-box" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ALL PINS ===== -->
+      <div class="page" id="page-posts">
+        <div class="section-card">
+          <div class="section-header"><h3>Semua Pin</h3><button class="btn btn-primary" onclick="loadPosts()">Refresh</button></div>
+          <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Konten</th><th>Status</th><th>Tanggal</th><th>Platform</th><th>Aksi</th></tr></thead>
+            <tbody id="allPostsBody"><tr><td colspan="5" class="loading-cell">Loading...</td></tr></tbody>
+          </table></div>
+          <div class="pagination" id="postsPagination"></div>
+        </div>
+      </div>
+
+      <!-- ===== INSIGHTS ===== -->
+      <div class="page" id="page-insights">
+        <div class="insights-controls">
+          <div class="form-group"><label>Periode</label>
+            <select id="insightsPeriod" class="form-select" onchange="updateInsightDateInputs()">
+              <option value="daily">Harian (Pilih Tanggal)</option>
+              <option value="monthly">Bulanan (Pilih Bulan)</option>
+              <option value="yearly">Tahunan (Pilih Tahun)</option>
+            </select>
+          </div>
+          <div class="form-group" id="insDateFromGroup"><label>Dari</label><input type="date" id="insFrom" class="form-input"></div>
+          <div class="form-group" id="insDateToGroup"><label>Sampai</label><input type="date" id="insTo" class="form-input"></div>
+          <div class="form-group" id="insMonthFromGroup" style="display:none"><label>Dari</label><input type="month" id="insMonthFrom" class="form-input"></div>
+          <div class="form-group" id="insMonthToGroup" style="display:none"><label>Sampai</label><input type="month" id="insMonthTo" class="form-input"></div>
+          <div class="form-group" id="insYearFromGroup" style="display:none"><label>Dari</label><input type="number" id="insYearFrom" class="form-input" min="2020" max="2030"></div>
+          <div class="form-group" id="insYearToGroup" style="display:none"><label>Sampai</label><input type="number" id="insYearTo" class="form-input" min="2020" max="2030"></div>
+          <div class="form-group" style="align-self:flex-end"><button class="btn btn-primary" onclick="loadInsights()">Load</button></div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="insTotalImpressions">-</span><span class="kpi-label">Total Impressions</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="insTotalSaves">-</span><span class="kpi-label">Total Saves</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="insTotalClicks">-</span><span class="kpi-label">Total Clicks</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="insAvgImpressions">-</span><span class="kpi-label">Avg/Day</span></div></div>
+        </div>
+
+        <div class="charts-row">
+          <div class="chart-card"><h3>Impressions</h3><div class="chart-wrap"><canvas id="chartInsImpressions"></canvas></div></div>
+          <div class="chart-card"><h3>Breakdown</h3><div class="chart-wrap"><canvas id="chartInsBreakdown"></canvas></div></div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card"><h3>Saves</h3><div class="chart-wrap"><canvas id="chartInsSaves"></canvas></div></div>
+          <div class="chart-card"><h3>Outbound Clicks</h3><div class="chart-wrap"><canvas id="chartInsClicks"></canvas></div></div>
+        </div>
+
+        <div class="section-card"><h3>Breakdown Detail</h3>
+          <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Tanggal</th><th>Pins</th><th>Impressions</th><th>Saves</th><th>Clicks</th><th>Likes</th></tr></thead>
+            <tbody id="insightsTableBody"><tr><td colspan="6" class="loading-cell">Pilih periode dan klik Load</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- ===== FOLLOWERS ===== -->
+      <div class="page" id="page-followers">
+        <div class="kpi-grid">
+          <div class="kpi-card featured"><div class="kpi-data"><span class="kpi-value big" id="flwTotal">-</span><span class="kpi-label">Total Followers</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="flwToday">-</span><span class="kpi-label">Hari Ini</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="flwYesterday">-</span><span class="kpi-label">Kemarin</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="flwThisWeek">-</span><span class="kpi-label">Minggu Ini</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="flwThisMonth">-</span><span class="kpi-label">Bulan Ini</span></div></div>
+          <div class="kpi-card"><div class="kpi-data"><span class="kpi-value" id="flwAvgDaily">-</span><span class="kpi-label">Rata-rata/Hari</span></div></div>
+        </div>
+
+        <div class="charts-row">
+          <div class="chart-card" style="grid-column:span 2"><h3>Follower History</h3>
+            <div class="chart-wrap" style="height:220px"><canvas id="chartFlwHistory"></canvas></div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <h3>History Table</h3>
+            <div>
+              <select id="flwGranularity" class="form-select" style="width:auto;display:inline"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+              <button class="btn btn-primary" onclick="loadFollowers()">Load</button>
+            </div>
+          </div>
+          <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Tanggal</th><th>Followers</th><th>Change</th></tr></thead>
+            <tbody id="flwTableBody"><tr><td colspan="3" class="loading-cell">Loading...</td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- ===== BOARDS ===== -->
+      <div class="page" id="page-boards">
+        <div class="section-card">
+          <div class="section-header">
+            <h3>Boards</h3>
+            <div>
+              <button class="btn btn-secondary" onclick="loadBoards()">Refresh</button>
+              <button class="btn btn-primary" onclick="showCreateBoardModal()">+ Board Baru</button>
+            </div>
+          </div>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+            Kelola board Pinterest. Board default dipakai bila pin tidak menentukan board tujuan.
+          </p>
+          <div id="boardsGrid" class="keys-grid"><div class="keys-loading">Memuat boards...</div></div>
+        </div>
+      </div>
+
+      <!-- ===== MASS UPLOAD ===== -->
+      <div class="page" id="page-mass-upload">
+        <div class="tab-bar">
+          <button class="mtab-btn active" data-mtab="products">Produk (Upload)</button>
+          <button class="mtab-btn" data-mtab="drafts">Draft (<span id="draftTabCount">0</span>)</button>
+        </div>
+
+        <!-- Products tab -->
+        <div class="mtab-content active" id="mtab-products">
+          <div class="form-card">
+            <h3>Upload File Produk (JSON)</h3>
+            <p style="font-size:12px;color:var(--text2);margin-bottom:12px">
+              Unggah file hasil scraping (mis. <code>shopee_products.json</code>). Produk akan tampil di bawah untuk diseleksi, disimpan sebagai draft, atau dijadwalkan.
+            </p>
+            <div class="upload-zone" id="jsonUploadZone">
+              <div class="upload-icon">&#8682;</div>
+              <p>Seret & lepas file JSON atau <span class="upload-link" onclick="document.getElementById('jsonFileInput').click()">pilih file</span></p>
+              <small>Format: .json (array <code>products</code>)</small>
+              <input type="file" id="jsonFileInput" accept=".json,application/json" style="display:none">
+            </div>
+            <div id="jsonMeta" class="result-box info" style="display:none"></div>
+          </div>
+
+          <div class="section-card" id="productsSection" style="display:none">
+            <div class="product-toolbar">
+              <h3>Daftar Produk (<span id="productsCount">0</span>)</h3>
+              <label class="check-inline"><input type="checkbox" id="selectAllProducts"> Pilih semua</label>
+            </div>
+            <div id="productsList" class="product-list"></div>
+          </div>
+
+          <div class="form-card" id="massActionBar" style="display:none">
+            <h3>Jadwalkan <span id="massSelectedCount">0</span> produk terpilih</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Board Tujuan</label><select id="massBoard" class="form-select"><option value="">Board default</option></select></div>
+              <div class="form-group"><label>Posting per Hari</label><input type="number" id="massPerDay" class="form-input" min="1" value="3"></div>
+              <div class="form-group"><label>Tanggal Mulai</label><input type="date" id="massStartDate" class="form-input"></div>
+              <div class="form-group"><label>Tanggal Selesai (otomatis)</label><input type="date" id="massEndDate" class="form-input" readonly></div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-secondary" id="btnSaveDraft">Simpan ke Draft</button>
+              <button class="btn btn-danger" id="btnRemoveSelected">Hapus dari List</button>
+              <button class="btn btn-primary" id="btnScheduleSelected">Buat Penjadwalan</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Drafts tab -->
+        <div class="mtab-content" id="mtab-drafts">
+          <div class="section-card">
+            <div class="product-toolbar">
+              <h3>Draft Tersimpan (<span id="draftsCount">0</span>)</h3>
+              <div class="toolbar-actions">
+                <label class="check-inline"><input type="checkbox" id="selectAllDrafts"> Pilih semua</label>
+                <button class="btn btn-danger btn-sm" id="btnDeleteDrafts">Hapus Terpilih</button>
+              </div>
+            </div>
+            <div id="draftsList" class="product-list"><div class="keys-loading">Belum ada draft</div></div>
+          </div>
+
+          <div class="form-card" id="draftActionBar" style="display:none">
+            <h3>Jadwalkan <span id="draftSelectedCount">0</span> draft terpilih</h3>
+            <div class="form-grid">
+              <div class="form-group"><label>Board Tujuan</label><select id="draftBoard" class="form-select"><option value="">Board default</option></select></div>
+              <div class="form-group"><label>Posting per Hari</label><input type="number" id="draftPerDay" class="form-input" min="1" value="3"></div>
+              <div class="form-group"><label>Tanggal Mulai</label><input type="date" id="draftStartDate" class="form-input"></div>
+              <div class="form-group"><label>Tanggal Selesai (otomatis)</label><input type="date" id="draftEndDate" class="form-input" readonly></div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="btnScheduleDrafts">Buat Penjadwalan dari Draft</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== EXPORT CSV ===== -->
+      <div class="page" id="page-csv-export">
+        <div class="section-card">
+          <div class="section-header"><h3>Konversi JSON &rarr; CSV Pinterest</h3></div>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">
+            Unggah file produk JSON (mis. <code>shopee_products.json</code>), lalu buat file <code>shopee_[unixtime].csv</code> sesuai format bulk upload Pinterest.
+          </p>
+          <div class="upload-zone" id="csvUploadZone">
+            <div class="upload-icon">&#128229;</div>
+            <p>Seret & lepas file JSON atau <span class="upload-link" onclick="document.getElementById('csvFileInput').click()">pilih file</span></p>
+            <small>Format: .json (array <code>products</code>)</small>
+            <input type="file" id="csvFileInput" accept=".json,application/json" style="display:none">
+          </div>
+          <div id="csvMeta" class="result-box info" style="display:none"></div>
+        </div>
+
+        <div class="csv-warning">
+          <strong>Perhatian sebelum upload ke Pinterest:</strong> Pinterest menolak pin yang memakai gambar di-hotlink dari marketplace (Shopee) dan listing hasil scraping &mdash; hal inilah yang membuat akun Zernio disuspend karena dianggap spam. Agar akun baru Anda aman: gunakan gambar/media milik Anda sendiri dengan URL publik yang berakhiran <code>.jpg</code> / <code>.png</code> / <code>.mp4</code>. URL gambar Shopee berakhiran <code>.webp</code> sehingga akan ditolak Pinterest. Kolom <em>Media URL</em> pada CSV tetap diisi apa adanya dari data JSON.
+        </div>
+
+        <div class="form-card">
+          <h3>Pengaturan CSV</h3>
+          <div class="form-grid">
+            <div class="form-group"><label>Pinterest board</label><select id="csvBoard" class="form-select"><option value="">Board default</option></select></div>
+            <div class="form-group"><label>Posting per Hari</label><input type="number" id="csvPerDay" class="form-input" min="1" value="3"></div>
+            <div class="form-group"><label>Tanggal Mulai Publikasi</label><input type="date" id="csvStartDate" class="form-input"></div>
+            <div class="form-group"><label>Tanggal Selesai (otomatis)</label><input type="date" id="csvEndDate" class="form-input" readonly></div>
+            <div class="form-group" style="grid-column:1/-1"><label>Keywords (opsional, dipakai untuk semua baris)</label><input type="text" id="csvKeywords" class="form-input" placeholder="mis. fashion, pria, kemeja"></div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="btnGenerateCsv" disabled>Buat &amp; Unduh CSV</button>
+            <span id="csvPreview" style="font-size:12px;color:var(--text2);margin-left:8px"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCHEDULE ===== -->
+      <div class="page" id="page-schedule">
+        <div class="section-card">
+          <div class="section-header">
+            <h3>Kalender Penjadwalan</h3>
+            <div class="cal-nav">
+              <button class="btn btn-sm btn-secondary" onclick="schCalPrev()">&#9664;</button>
+              <span id="schCalMonthLabel" style="font-size:13px;font-weight:600;min-width:140px;text-align:center"></span>
+              <button class="btn btn-sm btn-secondary" onclick="schCalNext()">&#9654;</button>
+            </div>
+          </div>
+          <div id="scheduleCalendarGrid" class="calendar-grid"></div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <h3>Daftar Penjadwalan (<span id="schedulesCount">0</span>)</h3>
+            <button class="btn btn-secondary" onclick="loadSchedules()">Refresh</button>
+          </div>
+          <div id="schedulesList" class="keys-grid"><div class="keys-loading">Memuat penjadwalan...</div></div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-header">
+            <h3>Terjadwal di Pinterest (<span id="remoteSchedulesCount">0</span>)</h3>
+            <button class="btn btn-secondary" onclick="loadRemoteScheduled()">Refresh</button>
+          </div>
+          <div id="remoteSchedulesList" class="keys-grid"><div class="keys-loading">Memuat pin terjadwal...</div></div>
+        </div>
+      </div>
+
+      <!-- ===== SETTINGS ===== -->
+      <div class="page" id="page-settings">
+        <!-- API Key Management -->
+        <div class="section-card">
+          <div class="section-header">
+            <h3>Koneksi API Zernio</h3>
+            <button class="btn btn-primary" onclick="showAddKeyModal()">+ Tambah API Key</button>
+          </div>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+            Kelola API key Zernio yang terhubung ke akun Pinterest Anda.
+          </p>
+          <div id="keysContainer" class="keys-grid">
+            <div class="keys-loading">Memuat koneksi...</div>
+          </div>
+          <div id="keysEmpty" style="display:none;text-align:center;padding:32px;color:var(--text2)">
+            <div style="font-size:48px;margin-bottom:12px">&#128274;</div>
+            <p style="font-size:14px;margin-bottom:6px">Belum ada API key</p>
+            <p style="font-size:12px;margin-bottom:14px">Tambahkan API key Zernio untuk menghubungkan akun Pinterest</p>
+            <button class="btn btn-primary" onclick="showAddKeyModal()">+ Tambah API Key</button>
+          </div>
+        </div>
+
+        <!-- Akun Aktif -->
+        <div class="form-card" style="margin-top:10px">
+          <h3>Akun Aktif Saat Ini</h3>
+          <div class="settings-info">
+            <div class="setting-row"><span class="setting-label">Account ID:</span><span class="setting-value" id="settAccountId">-</span></div>
+            <div class="setting-row"><span class="setting-label">Username:</span><span class="setting-value" id="settPageName">-</span></div>
+            <div class="setting-row"><span class="setting-label">Profile URL:</span><span class="setting-value" id="settPageUrl">-</span></div>
+            <div class="setting-row"><span class="setting-label">Boards:</span><span class="setting-value" id="settBoards">-</span></div>
+            <div class="setting-row"><span class="setting-label">Status:</span><span class="setting-value" id="settStatus">-</span></div>
+          </div>
+        </div>
+
+        <!-- Endpoint Reference -->
+        <div class="section-card" style="margin-top:10px">
+          <h3>Endpoint Reference</h3>
+          <div class="endpoint-list">
+            <div class="endpoint-item"><span class="method get">GET</span><code>/api/accounts</code><span>List Pinterest accounts</span></div>
+            <div class="endpoint-item"><span class="method get">GET</span><code>/api/accounts/:id/pinterest-boards</code><span>List boards</span></div>
+            <div class="endpoint-item"><span class="method post">POST</span><code>/api/accounts/:id/pinterest-boards</code><span>Create board</span></div>
+            <div class="endpoint-item"><span class="method put">PUT</span><code>/api/accounts/:id/pinterest-boards</code><span>Set default board</span></div>
+            <div class="endpoint-item"><span class="method post">POST</span><code>/api/posts</code><span>Create pin</span></div>
+            <div class="endpoint-item"><span class="method delete">DEL</span><code>/api/posts/:id</code><span>Delete post</span></div>
+            <div class="endpoint-item"><span class="method post">POST</span><code>/api/media/presign</code><span>Presigned upload URL</span></div>
+            <div class="endpoint-item"><span class="method get">GET</span><code>/api/analytics/daily-metrics</code><span>Daily metrics</span></div>
+            <div class="endpoint-item"><span class="method get">GET</span><code>/api/accounts/follower-stats</code><span>Follower tracking</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Delete Key Modal -->
+      <div class="modal-overlay" id="deleteKeyModal" style="display:none">
+        <div class="modal-card">
+          <div class="modal-icon danger">&#9888;</div>
+          <h3>Hapus Koneksi API?</h3>
+          <p class="modal-text">API key <strong id="deleteKeyName"></strong> akan dihapus permanen. Akun <strong id="deleteKeyPage"></strong> tidak akan bisa diakses lagi dari dashboard ini.</p>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeDeleteKeyModal()">Batal</button>
+            <button class="btn btn-danger" id="btnConfirmDeleteKey">Hapus</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Key Modal -->
+      <div class="modal-overlay" id="addKeyModal" style="display:none">
+        <div class="modal-card">
+          <div class="modal-icon primary">+</div>
+          <h3>Tambah API Key Baru</h3>
+          <p class="modal-text">Masukkan API key Zernio Anda. Key akan divalidasi terlebih dahulu.</p>
+          <div class="form-group" style="margin-top:12px">
+            <label>API Key</label>
+            <input type="text" id="newApiKeyInput" class="form-input" placeholder="sk_..." style="font-family:'Fira Code',monospace">
+          </div>
+          <div id="addKeyError" class="result-box error" style="display:none;margin-top:10px"></div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeAddKeyModal()">Batal</button>
+            <button class="btn btn-primary" id="btnSubmitNewKey">Tambah & Validasi</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Create Board Modal -->
+      <div class="modal-overlay" id="createBoardModal" style="display:none">
+        <div class="modal-card">
+          <div class="modal-icon primary">&#9645;</div>
+          <h3>Buat Board Baru</h3>
+          <p class="modal-text">Board baru akan dibuat pada akun Pinterest aktif.</p>
+          <div class="form-group" style="margin-top:12px">
+            <label>Nama Board</label>
+            <input type="text" id="newBoardName" class="form-input" placeholder="Mis. Marketing Ideas">
+          </div>
+          <div class="form-group" style="margin-top:10px">
+            <label>Deskripsi</label>
+            <input type="text" id="newBoardDesc" class="form-input" placeholder="Opsional">
+          </div>
+          <div class="form-group" style="margin-top:10px">
+            <label>Privasi</label>
+            <select id="newBoardPrivacy" class="form-select"><option value="PUBLIC">Public</option><option value="PROTECTED">Protected</option><option value="SECRET">Secret</option></select>
+          </div>
+          <div id="createBoardError" class="result-box error" style="display:none;margin-top:10px"></div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeCreateBoardModal()">Batal</button>
+            <button class="btn btn-primary" id="btnSubmitNewBoard">Buat Board</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Image Zoom Modal -->
+      <div class="modal-overlay" id="imageZoomModal" style="display:none">
+        <div class="image-zoom-card">
+          <img id="imageZoomImg" src="" alt="">
+          <div class="image-zoom-info" id="imageZoomInfo"></div>
+          <div class="modal-actions"><button class="btn btn-secondary" onclick="closeImageZoom()">Tutup</button></div>
+        </div>
+      </div>
+
+      <!-- Schedule Confirm Modal -->
+      <div class="modal-overlay" id="scheduleModal" style="display:none">
+        <div class="modal-card">
+          <div class="modal-icon primary">&#128197;</div>
+          <h3>Buat Penjadwalan</h3>
+          <p class="modal-text">Periksa ringkasan berikut sebelum menyimpan penjadwalan.</p>
+          <div class="form-group" style="margin-top:12px;text-align:left">
+            <label>Nama Penjadwalan</label>
+            <input type="text" id="scheduleName" class="form-input" placeholder="Mis. Promo Akhir Pekan">
+          </div>
+          <div class="schedule-summary" id="scheduleSummary"></div>
+          <div id="scheduleError" class="result-box error" style="display:none;margin-top:10px"></div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeScheduleModal()">Batal</button>
+            <button class="btn btn-primary" id="btnConfirmSchedule">Simpan Penjadwalan</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Schedule Detail Modal -->
+      <div class="modal-overlay" id="scheduleDetailModal" style="display:none">
+        <div class="modal-card" style="max-width:760px;text-align:left">
+          <h3 id="schDetailTitle">Detail Penjadwalan</h3>
+          <p class="modal-text" id="schDetailMeta"></p>
+          <div class="sch-detail-list" id="schDetailList"></div>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="btnDetailPublish">Publish ke Zernio</button>
+            <button class="btn btn-secondary" onclick="closeScheduleDetail()">Tutup</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <div class="overlay" id="switchOverlay" style="display:none">
+    <div class="overlay-content">
+      <div class="overlay-spinner"></div>
+      <div class="overlay-text" id="overlayText">Mengganti akun...</div>
+    </div>
+  </div>
+  <script src="js/app.js"></script>
+</body>
+</html>
