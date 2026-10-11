@@ -5,7 +5,9 @@ function uid(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-function emptyStore() { return { drafts: [], schedules: [] }; }
+const DEFAULT_SETTINGS = { timezone: 'Asia/Jakarta', postingTimes: ['09:00', '13:00', '17:00', '20:00'] };
+
+function emptyStore() { return { drafts: [], schedules: [], settings: { ...DEFAULT_SETTINGS, postingTimes: [...DEFAULT_SETTINGS.postingTimes] } }; }
 
 function loadStore(storePath) {
   let data = emptyStore();
@@ -15,6 +17,9 @@ function loadStore(storePath) {
   } catch { data = emptyStore(); }
   if (!Array.isArray(data.drafts)) data.drafts = [];
   if (!Array.isArray(data.schedules)) data.schedules = [];
+  if (!data.settings || typeof data.settings !== 'object') data.settings = { ...DEFAULT_SETTINGS, postingTimes: [...DEFAULT_SETTINGS.postingTimes] };
+  if (!Array.isArray(data.settings.postingTimes) || !data.settings.postingTimes.length) data.settings.postingTimes = [...DEFAULT_SETTINGS.postingTimes];
+  if (!data.settings.timezone) data.settings.timezone = DEFAULT_SETTINGS.timezone;
   return data;
 }
 
@@ -107,6 +112,19 @@ function registerStoreRoutes(app, opts) {
 
   app.get('/api/store', (req, res) => {
     res.json(loadStore(storePath));
+  });
+
+  // Persist master settings (timezone + master posting times)
+  app.post('/api/settings', (req, res) => {
+    const data = loadStore(storePath);
+    const s = req.body || {};
+    if (typeof s.timezone === 'string' && s.timezone) data.settings.timezone = s.timezone;
+    if (Array.isArray(s.postingTimes)) {
+      const times = s.postingTimes.filter(t => typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t));
+      if (times.length) data.settings.postingTimes = times;
+    }
+    saveStore(storePath, data);
+    res.json({ success: true, settings: data.settings });
   });
 
   // Add items to drafts (dedupe by productId, else by id)

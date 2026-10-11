@@ -355,7 +355,7 @@
         <div class="section-card">
           <div class="section-header"><h3>Konversi JSON &rarr; CSV Pinterest</h3></div>
           <p style="font-size:12px;color:var(--text2);margin-bottom:12px">
-            Unggah file produk JSON (mis. <code>shopee_products.json</code>), lalu buat file <code>shopee_[unixtime].csv</code> sesuai format bulk upload Pinterest.
+            Unggah file produk JSON (mis. <code>shopee_products.json</code>). Lihat daftarnya, simpan ke draft, lalu atur detail (board, jam, timezone) sebelum membuat file <code>shopee_[unixtime].csv</code>.
           </p>
           <div class="upload-zone" id="csvUploadZone">
             <div class="upload-icon">&#128229;</div>
@@ -367,18 +367,63 @@
         </div>
 
         <div class="csv-warning">
-          <strong>Perhatian sebelum upload ke Pinterest:</strong> Pinterest menolak pin yang memakai gambar di-hotlink dari marketplace (Shopee) dan listing hasil scraping &mdash; hal inilah yang membuat akun Zernio disuspend karena dianggap spam. Agar akun baru Anda aman: gunakan gambar/media milik Anda sendiri dengan URL publik yang berakhiran <code>.jpg</code> / <code>.png</code> / <code>.mp4</code>. URL gambar Shopee berakhiran <code>.webp</code> sehingga akan ditolak Pinterest. Kolom <em>Media URL</em> pada CSV tetap diisi apa adanya dari data JSON.
+          <strong>Perhatian sebelum upload ke Pinterest:</strong> Pinterest menolak pin yang memakai gambar di-hotlink dari marketplace (Shopee) dan listing hasil scraping &mdash; hal inilah yang membuat akun Zernio disuspend karena dianggap spam. Agar akun baru Anda aman: gunakan gambar/media milik Anda sendiri dengan URL publik yang berakhiran <code>.jpg</code> / <code>.png</code> / <code>.mp4</code>. URL gambar Shopee berakhiran <code>.webp</code> sehingga akan ditolak Pinterest. Kolom <em>Media URL</em> pada CSV tetap diisi apa adanya dari data.
+        </div>
+
+        <div class="tab-bar">
+          <button class="mtab-btn active" data-ctab="products">Produk (<span id="csvProductsTabCount">0</span>)</button>
+          <button class="mtab-btn" data-ctab="drafts">Draft (<span id="csvDraftsTabCount">0</span>)</button>
+        </div>
+
+        <!-- Products tab -->
+        <div class="mtab-content active" id="ctab-products">
+          <div class="section-card" id="csvProductsSection" style="display:none">
+            <div class="product-toolbar">
+              <h3>Daftar Produk (<span id="csvProductsCount">0</span>)</h3>
+              <label class="check-inline"><input type="checkbox" id="csvSelectAllProducts"> Pilih semua</label>
+            </div>
+            <div id="csvProductsList" class="product-list"></div>
+            <div class="form-actions">
+              <button class="btn btn-secondary" id="csvBtnSaveDraft">Simpan ke Draft</button>
+              <button class="btn btn-danger" id="csvBtnRemoveProducts">Hapus dari List</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Drafts tab -->
+        <div class="mtab-content" id="ctab-drafts">
+          <div class="section-card">
+            <div class="product-toolbar">
+              <h3>Draft Tersimpan (<span id="csvDraftsCount">0</span>)</h3>
+              <div class="toolbar-actions">
+                <label class="check-inline"><input type="checkbox" id="csvSelectAllDrafts"> Pilih semua</label>
+                <button class="btn btn-danger btn-sm" id="csvBtnDeleteDrafts">Hapus Terpilih</button>
+              </div>
+            </div>
+            <div id="csvDraftsList" class="product-list"><div class="keys-loading">Belum ada draft</div></div>
+          </div>
         </div>
 
         <div class="form-card">
-          <h3>Pengaturan CSV</h3>
+          <h3>Detail Pengaturan</h3>
           <div class="form-grid">
             <div class="form-group"><label>Pinterest board</label><select id="csvBoard" class="form-select"><option value="">Board default</option></select></div>
-            <div class="form-group"><label>Posting per Hari</label><input type="number" id="csvPerDay" class="form-input" min="1" value="3"></div>
+            <div class="form-group"><label>Timezone</label><select id="csvTimezone" class="form-select"></select></div>
+            <div class="form-group"><label>Posting per Hari</label><input type="number" id="csvPerDay" class="form-input" min="1" value="4"></div>
             <div class="form-group"><label>Tanggal Mulai Publikasi</label><input type="date" id="csvStartDate" class="form-input"></div>
             <div class="form-group"><label>Tanggal Selesai (otomatis)</label><input type="date" id="csvEndDate" class="form-input" readonly></div>
-            <div class="form-group" style="grid-column:1/-1"><label>Keywords (opsional, dipakai untuk semua baris)</label><input type="text" id="csvKeywords" class="form-input" placeholder="mis. fashion, pria, kemeja"></div>
+            <div class="form-group"><label>Keywords (opsional, dipakai untuk semua baris)</label><input type="text" id="csvKeywords" class="form-input" placeholder="mis. fashion, pria, kemeja"></div>
           </div>
+
+          <div class="mtimes-block">
+            <div class="mtimes-head">
+              <label>Master Jam Posting</label>
+              <button class="btn btn-sm btn-secondary" type="button" id="csvAddTime">+ Tambah Jam</button>
+            </div>
+            <div id="csvTimesList" class="mtimes-list"></div>
+            <div class="mtimes-hint" id="csvTimesHint"></div>
+          </div>
+
           <div class="form-actions">
             <button class="btn btn-primary" id="btnGenerateCsv" disabled>Buat &amp; Unduh CSV</button>
             <span id="csvPreview" style="font-size:12px;color:var(--text2);margin-left:8px"></span>

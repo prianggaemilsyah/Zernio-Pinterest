@@ -281,6 +281,18 @@ textarea { resize: vertical; }
 .csv-warning strong { color: var(--yellow); }
 .csv-warning code { background: var(--bg3); padding: 1px 4px; border-radius: 4px; color: var(--text); }
 
+/* Master posting times */
+.mtimes-block { margin-top: 14px; }
+.mtimes-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.mtimes-head label { font-size: 12px; color: var(--text2); font-weight: 600; }
+.mtimes-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.mtimes-row { display: flex; align-items: center; gap: 4px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; }
+.mtimes-row input[type="time"] { background: transparent; border: none; color: var(--text); font-size: 13px; width: 96px; outline: none; }
+.mtimes-row .mtimes-del { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: 4px; }
+.mtimes-row .mtimes-del:hover { color: var(--red); background: var(--bg2); }
+.mtimes-hint { margin-top: 8px; font-size: 11px; color: var(--text2); line-height: 1.5; }
+#csvAddTime.disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* Account problem banner */
 .account-banner { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; padding: 12px 14px; background: rgba(240,40,73,0.10); border: 1px solid var(--red); border-left: 4px solid var(--red); border-radius: 8px; }
 .account-banner-icon { font-size: 18px; color: var(--red); flex-shrink: 0; }

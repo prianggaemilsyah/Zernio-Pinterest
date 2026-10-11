@@ -5,13 +5,16 @@ let uploadedMedia = [], charts = {}, bulkItems = [], boards = [];
 let calYear, calMonth, calendarPosts = [];
 
 // Mass upload / drafts / schedules state
-let storeData = { drafts: [], schedules: [] };
+const DEFAULT_SETTINGS = { timezone: 'Asia/Jakarta', postingTimes: ['09:00', '13:00', '17:00', '20:00'] };
+let storeData = { drafts: [], schedules: [], settings: { ...DEFAULT_SETTINGS, postingTimes: [...DEFAULT_SETTINGS.postingTimes] } };
 let parsedProducts = [];            // products from uploaded JSON
 let selectedProductIds = new Set();
 let selectedDraftIds = new Set();
 let scheduleSource = null;          // { source:'products'|'drafts', items:[] }
 let schCalYear, schCalMonth, schDetailId = null;
 let csvProducts = [];               // products uploaded on the Export CSV page
+let selectedCsvProductIds = new Set();
+let selectedCsvDraftIds = new Set();
 let remoteScheduledPosts = [];      // pins already scheduled on Pinterest (via Zernio)
 
 // ========== INIT ==========
@@ -115,7 +118,7 @@ function switchPage(p) {
   if (p === 'settings') loadConnectedKeys();
   if (p === 'create-post') ensureBoardsLoaded();
   if (p === 'mass-upload') { ensureBoardsLoaded(); renderProducts(); renderDrafts(); }
-  if (p === 'csv-export') { ensureBoardsLoaded(); renderCsvPreview(); }
+  if (p === 'csv-export') { ensureBoardsLoaded(); renderCsvProducts(); renderCsvDrafts(); renderCsvTimezoneSelect(); renderCsvTimes(); renderCsvPreview(); }
   if (p === 'schedule') { loadSchedules(); }
 }
 function initDateRange() { document.getElementById('dateRange').addEventListener('change', () => loadDashboard()); }
@@ -216,7 +219,31 @@ function fillBoardSelects(opts) {
 }
 
 // ========== DASHBOARD ==========
+// Render the calendar from local scheduled pins first, then merge in the pins
+// that are scheduled on Pinterest (via Zernio). Works even if the account fetch
+// is slow or fails, so a successfully scheduled pin is never hidden.
+async function loadCalendarPosts() {
+  calendarPosts = [...localSchedulePosts()];
+  renderCalendar();
+  if (!currentAccountId) return;
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch(`/api/posts?platform=pinterest&limit=100&source=zernio`),
+      fetch(`/api/posts?platform=pinterest&limit=100&source=external&accountId=${currentAccountId}`)
+    ]);
+    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+    calendarPosts = [...(d1.posts || []), ...(d2.posts || []), ...localSchedulePosts()];
+    calendarPosts.sort((a, b) => {
+      const da = a.publishedAt || a.scheduledFor || a.createdAt || '';
+      const db = b.publishedAt || b.scheduledFor || b.createdAt || '';
+      return db.localeCompare(da);
+    });
+    renderCalendar();
+  } catch (e) { console.error(e); }
+}
+
 async function loadDashboard() {
+  loadCalendarPosts();
   if (!currentAccountId) return;
   document.getElementById('kpiFollowers').textContent = formatNumber(currentFans);
   document.getElementById('kpiBoards').textContent = formatNumber(currentBoardCount);
@@ -258,23 +285,6 @@ async function loadDashboard() {
       showEmptyChart('chartSaves', 'Belum ada data');
       showEmptyChart('chartClicks', 'Belum ada data');
     }
-  } catch(e) { console.error(e); }
-
-  // Pins for calendar + top pins
-  try {
-    const [r1, r2] = await Promise.all([
-      fetch(`/api/posts?platform=pinterest&limit=100&source=zernio`),
-      fetch(`/api/posts?platform=pinterest&limit=100&source=external&accountId=${currentAccountId}`)
-    ]);
-    const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
-    calendarPosts = [...(d1.posts||[]), ...(d2.posts||[])];
-    calendarPosts.push(...localSchedulePosts());
-    calendarPosts.sort((a,b) => {
-      const da = a.publishedAt || a.scheduledFor || a.createdAt || '';
-      const db = b.publishedAt || b.scheduledFor || b.createdAt || '';
-      return db.localeCompare(da);
-    });
-    renderCalendar();
   } catch(e) { console.error(e); }
 
   try {
@@ -996,12 +1006,15 @@ async function switchToKey(index) {
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 
 function initMassUpload() {
-  document.querySelectorAll('.mtab-btn').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('.mtab-btn').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.mtab-content').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    document.getElementById('mtab-' + b.dataset.mtab).classList.add('active');
-  }));
+  document.querySelectorAll('.mtab-btn').forEach(b => {
+    if (!b.dataset.mtab) return;
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.mtab-btn').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.mtab-content').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      document.getElementById('mtab-' + b.dataset.mtab).classList.add('active');
+    });
+  });
 
   const zone = document.getElementById('jsonUploadZone');
   const fi = document.getElementById('jsonFileInput');
@@ -1050,6 +1063,45 @@ async function handleJsonFile(file) {
 // ========== EXPORT CSV (Pinterest bulk upload) ==========
 const CSV_COLUMNS = ['Title', 'Media URL', 'Pinterest board', 'Thumbnail', 'Description', 'Link', 'Publish date', 'Keywords'];
 
+const CSV_TIMEZONES = [
+  { id: 'Asia/Jakarta', label: 'WIB \u2014 Asia/Jakarta (UTC+7)', offset: 7 },
+  { id: 'Asia/Makassar', label: 'WITA \u2014 Asia/Makassar (UTC+8)', offset: 8 },
+  { id: 'Asia/Jayapura', label: 'WIT \u2014 Asia/Jayapura (UTC+9)', offset: 9 },
+  { id: 'Asia/Singapore', label: 'SGT \u2014 Asia/Singapore (UTC+8)', offset: 8 },
+  { id: 'Asia/Kuala_Lumpur', label: 'MYT \u2014 Kuala Lumpur (UTC+8)', offset: 8 },
+  { id: 'UTC', label: 'UTC (UTC+0)', offset: 0 },
+  { id: 'Europe/London', label: 'London (UTC+0)', offset: 0 },
+  { id: 'America/Los_Angeles', label: 'US Pacific (UTC\u22127)', offset: -7 },
+  { id: 'America/New_York', label: 'US Eastern (UTC\u22124)', offset: -4 }
+];
+
+function currentTimezone() {
+  const id = (storeData.settings && storeData.settings.timezone) || 'Asia/Jakarta';
+  return CSV_TIMEZONES.find(z => z.id === id) || CSV_TIMEZONES[0];
+}
+
+function csvPerDayVal() {
+  const el = document.getElementById('csvPerDay');
+  return Math.max(1, parseInt(el && el.value) || 1);
+}
+
+function csvEffectiveTimes(perDay) {
+  per = Math.max(1, parseInt(perDay) || 1);
+  const list = (storeData.settings && storeData.settings.postingTimes) || ['09:00'];
+  const out = [];
+  for (let i = 0; i < per; i++) out.push(list[i % list.length]);
+  return out;
+}
+
+function updateCsvAddTimeState() {
+  const btn = document.getElementById('csvAddTime');
+  if (!btn) return;
+  const per = csvPerDayVal();
+  const atCap = (storeData.settings.postingTimes || []).length >= per;
+  btn.classList.toggle('disabled', atCap);
+  btn.title = atCap ? `Maksimal ${per} jam (sama dengan Posting per Hari)` : 'Tambah jam posting';
+}
+
 function initCsvExport() {
   const zone = document.getElementById('csvUploadZone');
   const fi = document.getElementById('csvFileInput');
@@ -1058,9 +1110,57 @@ function initCsvExport() {
   zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); if (e.dataTransfer.files[0]) handleCsvJsonFile(e.dataTransfer.files[0]); });
   zone.addEventListener('click', () => fi.click());
   fi.addEventListener('change', () => { if (fi.files[0]) handleCsvJsonFile(fi.files[0]); fi.value = ''; });
+
+  // Export CSV tabs (Produk / Draft)
+  document.querySelectorAll('.mtab-btn[data-ctab]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.mtab-btn[data-ctab]').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('#page-csv-export .mtab-content').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('ctab-' + b.dataset.ctab).classList.add('active');
+  }));
+
+  document.getElementById('csvSelectAllProducts').addEventListener('change', e => selectAll('csvproduct', e.target.checked));
+  document.getElementById('csvSelectAllDrafts').addEventListener('change', e => selectAll('csvdraft', e.target.checked));
+  document.getElementById('csvBtnSaveDraft').addEventListener('click', csvSaveSelectedToDrafts);
+  document.getElementById('csvBtnRemoveProducts').addEventListener('click', csvRemoveSelectedProducts);
+  document.getElementById('csvBtnDeleteDrafts').addEventListener('click', csvDeleteSelectedDrafts);
   document.getElementById('btnGenerateCsv').addEventListener('click', generateCsvFile);
   document.getElementById('csvBoard').addEventListener('change', renderCsvPreview);
-  ['csvStartDate', 'csvPerDay'].forEach(id => document.getElementById(id).addEventListener('input', updateCsvEndDate));
+  document.getElementById('csvStartDate').addEventListener('input', () => { renderCsvTimesHint(); renderCsvPreview(); });
+  document.getElementById('csvPerDay').addEventListener('input', () => {
+    const per = csvPerDayVal();
+    const times = storeData.settings.postingTimes;
+    if (times.length > per) {
+      storeData.settings.postingTimes = times.slice(0, per);
+      saveSettings();
+      renderCsvTimes();
+      toast(`Master jam disesuaikan: maksimal ${per} jam (sama dengan Posting per Hari).`, 'info');
+    }
+    renderCsvTimesHint();
+    renderCsvPreview();
+  });
+  document.getElementById('csvTimezone').addEventListener('change', e => {
+    storeData.settings.timezone = e.target.value;
+    saveSettings();
+    renderCsvTimesHint();
+    renderCsvPreview();
+  });
+  document.getElementById('csvAddTime').addEventListener('click', () => {
+    if (!Array.isArray(storeData.settings.postingTimes)) storeData.settings.postingTimes = [];
+    const per = csvPerDayVal();
+    if (storeData.settings.postingTimes.length >= per) {
+      toast(`Maksimal ${per} jam posting (sama dengan Posting per Hari). Naikkan "Posting per Hari" untuk menambah jam.`, 'error');
+      return;
+    }
+    storeData.settings.postingTimes.push('12:00');
+    saveSettings();
+    renderCsvTimes();
+    renderCsvTimesHint();
+    renderCsvPreview();
+  });
+
+  renderCsvTimezoneSelect();
+  renderCsvTimes();
 }
 
 async function handleCsvJsonFile(file) {
@@ -1069,19 +1169,23 @@ async function handleCsvJsonFile(file) {
     const json = JSON.parse(await file.text());
     const products = Array.isArray(json) ? json : (json.products || []);
     if (!Array.isArray(products) || !products.length) throw new Error('Tidak ada array "products" di file');
-    csvProducts = products;
+    csvProducts = products.map((p, i) => ({ ...p, _id: String(p.product_id || ('cp_' + i)) }));
+    selectedCsvProductIds.clear();
+    const sa = document.getElementById('csvSelectAllProducts'); if (sa) sa.checked = false;
     meta.className = 'result-box info';
-    const withImg = products.filter(p => (p.images && p.images[0]) || p.image).length;
-    meta.textContent = `Terbaca ${products.length} produk (${withImg} punya gambar) dari ${file.name}.`;
+    const withImg = csvProducts.filter(p => (p.images && p.images[0]) || p.image).length;
+    meta.textContent = `Terbaca ${csvProducts.length} produk (${withImg} punya gambar) dari ${file.name}. Pilih produk lalu simpan ke draft, atau langsung atur detail di bawah.`;
     meta.style.display = 'block';
-    renderCsvPreview();
-    toast(`${products.length} produk siap dikonversi`, 'success');
+    const ptab = document.querySelector('.mtab-btn[data-ctab="products"]'); if (ptab) ptab.click();
+    renderCsvProducts();
+    toast(`${csvProducts.length} produk dimuat`, 'success');
   } catch (e) {
     csvProducts = [];
+    selectedCsvProductIds.clear();
     meta.className = 'result-box error';
     meta.textContent = 'Gagal membaca file: ' + e.message;
     meta.style.display = 'block';
-    renderCsvPreview();
+    renderCsvProducts();
   }
 }
 
@@ -1099,17 +1203,26 @@ function csvBoardName() {
   return (boards && boards[0] && boards[0].name) || '';
 }
 
+// Products/drafts currently feeding the CSV: selected drafts > selected products > all products > all drafts.
+function csvSourceItems() {
+  if (selectedCsvDraftIds.size) return storeData.drafts.filter(d => selectedCsvDraftIds.has(d.id));
+  if (selectedCsvProductIds.size) return csvProducts.filter(p => selectedCsvProductIds.has(p._id));
+  if (csvProducts.length) return csvProducts;
+  return storeData.drafts;
+}
+
 function csvPublishDate(startDate, perDay, index) {
   if (!startDate) return '';
   const per = Math.max(1, parseInt(perDay) || 1);
-  const parts = String(startDate).split('-').map(Number);
+  const times = csvEffectiveTimes(per);
+  const hm = String(times[index % per] || '09:00').split(':');
   const dayOffset = Math.floor(index / per);
-  const stepMin = Math.round((index % per) * (9 * 60) / per);
-  const d = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1, 9, 0, 0);
-  d.setDate(d.getDate() + dayOffset);
-  d.setMinutes(d.getMinutes() + stepMin);
+  const [Y, M, D] = String(startDate).split('-').map(Number);
+  const tz = currentTimezone();
+  const utcMs = Date.UTC(Y, (M || 1) - 1, (D || 1) + dayOffset, parseInt(hm[0]) || 0, parseInt(hm[1]) || 0, 0) - tz.offset * 3600000;
+  const d = new Date(utcMs);
   const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
 function csvEscape(v) {
@@ -1122,21 +1235,29 @@ function updateCsvEndDate() {
   if (!el) return;
   const start = document.getElementById('csvStartDate').value;
   const per = parseInt(document.getElementById('csvPerDay').value) || 1;
-  el.value = start && csvProducts.length ? computeEndDate(start, per, csvProducts.length) : '';
+  const items = csvSourceItems();
+  el.value = start && items.length ? computeEndDate(start, per, items.length) : '';
 }
 
 function renderCsvPreview() {
   const btn = document.getElementById('btnGenerateCsv');
   const prev = document.getElementById('csvPreview');
   if (!btn) return;
-  btn.disabled = !csvProducts.length;
-  if (!csvProducts.length) { prev.textContent = 'Belum ada file diunggah.'; updateCsvEndDate(); return; }
-  const noImg = csvProducts.filter(p => !((p.images && p.images[0]) || p.image)).length;
-  const board = csvBoardName();
-  const parts = [`${csvProducts.length} produk`];
+  const items = csvSourceItems();
+  btn.disabled = !items.length;
+  if (!items.length) { prev.textContent = 'Belum ada file diunggah.'; updateCsvEndDate(); return; }
+  const src = selectedCsvDraftIds.size ? `${selectedCsvDraftIds.size} draft terpilih`
+    : selectedCsvProductIds.size ? `${selectedCsvProductIds.size} produk terpilih`
+    : csvProducts.length ? `${csvProducts.length} produk`
+    : `${storeData.drafts.length} draft`;
+  const noImg = items.filter(p => !((p.images && p.images[0]) || p.image)).length;
+  const per = parseInt(document.getElementById('csvPerDay').value) || 1;
+  const tz = currentTimezone();
+  const parts = [`${items.length} item (${src})`];
   if (noImg) parts.push(`${noImg} tanpa gambar`);
-  parts.push('board: ' + (board || '(belum dipilih!)'));
-  prev.textContent = parts.join(' • ');
+  parts.push('board: ' + (csvBoardName() || '(belum dipilih!)'));
+  parts.push(`${per}/hari @ ${csvEffectiveTimes(per).join(', ')} ${tz.label.match(/\(([^)]+)\)/)?.[1] || tz.id}`);
+  prev.textContent = parts.join(' \u2022 ');
   updateCsvEndDate();
 }
 
@@ -1146,11 +1267,11 @@ function buildCsv() {
   const start = document.getElementById('csvStartDate').value;
   const keywords = document.getElementById('csvKeywords').value.trim();
   const lines = [CSV_COLUMNS.join(',')];
-  csvProducts.forEach((p, i) => {
+  csvSourceItems().forEach((p, i) => {
     const title = clipText(p.nama_produk || p.title || '', 100);
     const media = (p.images && p.images[0]) || p.image || '';
     const desc = clipText(p.description || p.nama_produk || p.title || '', 500);
-    const link = p.link_komisi || p.link_produk || '';
+    const link = p.link_komisi || p.link_produk || p.affiliateLink || p.productLink || '';
     const pub = start ? csvPublishDate(start, per, i) : '';
     lines.push([title, media, board, '', desc, link, pub, keywords].map(csvEscape).join(','));
   });
@@ -1158,7 +1279,8 @@ function buildCsv() {
 }
 
 function generateCsvFile() {
-  if (!csvProducts.length) { toast('Unggah file JSON dulu', 'error'); return; }
+  const items = csvSourceItems();
+  if (!items.length) { toast('Unggah file JSON atau pilih draft dulu', 'error'); return; }
   if (!csvBoardName()) { toast('Pilih board tujuan dulu', 'error'); return; }
   const unix = Math.floor(Date.now() / 1000);
   const filename = `shopee_${unix}.csv`;
@@ -1168,7 +1290,127 @@ function generateCsvFile() {
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
-  toast(`CSV dibuat: ${filename} (${csvProducts.length} baris)`, 'success');
+  toast(`CSV dibuat: ${filename} (${items.length} baris)`, 'success');
+}
+
+// ===== Export CSV: products + drafts =====
+function renderCsvProducts() {
+  const section = document.getElementById('csvProductsSection');
+  const list = document.getElementById('csvProductsList');
+  if (!section) return;
+  selectedCsvProductIds = new Set([...selectedCsvProductIds].filter(id => csvProducts.some(p => p._id === id)));
+  const tc = document.getElementById('csvProductsTabCount'); if (tc) tc.textContent = csvProducts.length;
+  if (!csvProducts.length) { section.style.display = 'none'; renderCsvPreview(); return; }
+  section.style.display = 'block';
+  const c = document.getElementById('csvProductsCount'); if (c) c.textContent = csvProducts.length;
+  list.innerHTML = csvProducts.map(p => productRow(p, selectedCsvProductIds.has(p._id), 'csvproduct')).join('');
+  renderCsvPreview();
+}
+
+function renderCsvDrafts() {
+  const list = document.getElementById('csvDraftsList');
+  const countEl = document.getElementById('csvDraftsCount');
+  const tabEl = document.getElementById('csvDraftsTabCount');
+  if (countEl) countEl.textContent = storeData.drafts.length;
+  if (tabEl) tabEl.textContent = storeData.drafts.length;
+  if (!list) return;
+  selectedCsvDraftIds = new Set([...selectedCsvDraftIds].filter(id => storeData.drafts.some(d => d.id === id)));
+  if (!storeData.drafts.length) { list.innerHTML = '<div class="keys-loading">Belum ada draft</div>'; return; }
+  list.innerHTML = storeData.drafts.map(d => productRow(d, selectedCsvDraftIds.has(d.id), 'csvdraft')).join('');
+}
+
+async function csvSaveSelectedToDrafts() {
+  if (!selectedCsvProductIds.size) { toast('Pilih produk dulu', 'error'); return; }
+  const items = csvProducts.filter(p => selectedCsvProductIds.has(p._id));
+  try {
+    const r = await fetch('/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+    const d = await r.json();
+    storeData.drafts = d.drafts || storeData.drafts;
+  } catch (e) { toast('Gagal menyimpan draft: ' + e.message, 'error'); return; }
+  selectedCsvProductIds.clear();
+  const sa = document.getElementById('csvSelectAllProducts'); if (sa) sa.checked = false;
+  renderCsvProducts();
+  renderCsvDrafts();
+  const dtab = document.querySelector('.mtab-btn[data-ctab="drafts"]'); if (dtab) dtab.click();
+  toast(`${items.length} produk disimpan ke draft`, 'success');
+}
+
+function csvRemoveSelectedProducts() {
+  if (!selectedCsvProductIds.size) { toast('Pilih produk dulu', 'error'); return; }
+  csvProducts = csvProducts.filter(p => !selectedCsvProductIds.has(p._id));
+  selectedCsvProductIds.clear();
+  const sa = document.getElementById('csvSelectAllProducts'); if (sa) sa.checked = false;
+  renderCsvProducts();
+}
+
+async function csvDeleteSelectedDrafts() {
+  if (!selectedCsvDraftIds.size) { toast('Pilih draft dulu', 'error'); return; }
+  if (!confirm(`Hapus ${selectedCsvDraftIds.size} draft?`)) return;
+  try {
+    const r = await fetch('/api/drafts/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [...selectedCsvDraftIds] }) });
+    const d = await r.json();
+    storeData.drafts = d.drafts || [];
+  } catch (e) { toast('Gagal menghapus: ' + e.message, 'error'); return; }
+  selectedCsvDraftIds.clear();
+  const sa = document.getElementById('csvSelectAllDrafts'); if (sa) sa.checked = false;
+  renderCsvDrafts();
+  renderDrafts();
+  toast('Draft dihapus', 'success');
+}
+
+// ===== Master posting times + timezone =====
+function renderCsvTimezoneSelect() {
+  const sel = document.getElementById('csvTimezone');
+  if (!sel) return;
+  const tz = (storeData.settings && storeData.settings.timezone) || 'Asia/Jakarta';
+  sel.innerHTML = CSV_TIMEZONES.map(z => `<option value="${z.id}" ${z.id === tz ? 'selected' : ''}>${escapeHtml(z.label)}</option>`).join('');
+}
+
+function renderCsvTimes() {
+  const box = document.getElementById('csvTimesList');
+  if (!box) return;
+  if (!Array.isArray(storeData.settings.postingTimes) || !storeData.settings.postingTimes.length) storeData.settings.postingTimes = ['09:00'];
+  box.innerHTML = storeData.settings.postingTimes.map((t, i) =>
+    `<div class="mtimes-row"><input type="time" value="${escapeHtml(t)}" data-idx="${i}"><button type="button" class="mtimes-del" data-idx="${i}" title="Hapus">\u2715</button></div>`
+  ).join('');
+  box.querySelectorAll('input[type="time"]').forEach(inp => inp.addEventListener('input', () => {
+    storeData.settings.postingTimes[parseInt(inp.dataset.idx)] = inp.value;
+    saveSettings();
+    renderCsvTimesHint();
+    renderCsvPreview();
+  }));
+  box.querySelectorAll('.mtimes-del').forEach(btn => btn.addEventListener('click', () => {
+    storeData.settings.postingTimes.splice(parseInt(btn.dataset.idx), 1);
+    if (!storeData.settings.postingTimes.length) storeData.settings.postingTimes = ['09:00'];
+    saveSettings();
+    renderCsvTimes();
+    renderCsvTimesHint();
+    renderCsvPreview();
+  }));
+  updateCsvAddTimeState();
+  renderCsvTimesHint();
+}
+
+function renderCsvTimesHint() {
+  const hint = document.getElementById('csvTimesHint');
+  if (!hint) return;
+  const per = csvPerDayVal();
+  const eff = csvEffectiveTimes(per);
+  const tz = currentTimezone();
+  const sign = tz.offset >= 0 ? '\u2212' : '+';
+  const n = (storeData.settings.postingTimes || []).length;
+  const cap = n >= per ? ` (maksimal ${per} jam)` : '';
+  hint.textContent = `${per} posting/hari: ${eff.join(', ')}${cap} • ${n} jam master (${tz.label}). Publish date di CSV ditulis dalam UTC (jam lokal ${sign} ${Math.abs(tz.offset)} jam).`;
+}
+
+async function saveSettings() {
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone: storeData.settings.timezone, postingTimes: storeData.settings.postingTimes })
+    });
+  } catch (e) { /* non-fatal */ }
 }
 
 function renderProducts() {
@@ -1212,20 +1454,32 @@ function productRow(p, checked, kind) {
   </div>`;
 }
 
+function selectCtx(kind) {
+  switch (kind) {
+    case 'product': return { set: selectedProductIds, items: () => parsedProducts, idOf: it => it._id, update: updateMassCounts, render: renderProducts };
+    case 'draft': return { set: selectedDraftIds, items: () => storeData.drafts, idOf: it => it.id, update: updateDraftCounts, render: renderDrafts };
+    case 'csvproduct': return { set: selectedCsvProductIds, items: () => csvProducts, idOf: it => it._id, update: renderCsvPreview, render: renderCsvProducts };
+    case 'csvdraft': return { set: selectedCsvDraftIds, items: () => storeData.drafts, idOf: it => it.id, update: renderCsvPreview, render: renderCsvDrafts };
+    default: return null;
+  }
+}
+
 function toggleSelect(kind, id, checked) {
-  const set = kind === 'product' ? selectedProductIds : selectedDraftIds;
-  if (checked) set.add(id); else set.delete(id);
+  const ctx = selectCtx(kind);
+  if (!ctx) return;
+  if (checked) ctx.set.add(id); else ctx.set.delete(id);
   const row = document.querySelector(`.product-item[data-kind="${kind}"][data-id="${id}"]`);
   if (row) row.classList.toggle('selected', checked);
-  if (kind === 'product') updateMassCounts(); else updateDraftCounts();
+  ctx.update();
 }
 
 function selectAll(kind, checked) {
-  const set = kind === 'product' ? selectedProductIds : selectedDraftIds;
-  set.clear();
-  const items = kind === 'product' ? parsedProducts : storeData.drafts;
-  items.forEach(it => { if (checked) set.add(kind === 'product' ? it._id : it.id); });
-  if (kind === 'product') renderProducts(); else renderDrafts();
+  const ctx = selectCtx(kind);
+  if (!ctx) return;
+  ctx.set.clear();
+  ctx.items().forEach(it => { if (checked) ctx.set.add(String(ctx.idOf(it))); });
+  ctx.render();
+  ctx.update();
 }
 
 function updateMassCounts() {
@@ -1307,8 +1561,15 @@ async function loadStore() {
     const d = await r.json();
     storeData.drafts = Array.isArray(d.drafts) ? d.drafts : [];
     storeData.schedules = Array.isArray(d.schedules) ? d.schedules : [];
+    if (d.settings && typeof d.settings === 'object') storeData.settings = d.settings;
+    if (!storeData.settings || typeof storeData.settings !== 'object') storeData.settings = { ...DEFAULT_SETTINGS, postingTimes: [...DEFAULT_SETTINGS.postingTimes] };
+    if (!Array.isArray(storeData.settings.postingTimes) || !storeData.settings.postingTimes.length) storeData.settings.postingTimes = [...DEFAULT_SETTINGS.postingTimes];
+    if (!storeData.settings.timezone) storeData.settings.timezone = DEFAULT_SETTINGS.timezone;
   } catch(e) { console.error('store', e); }
   renderDrafts();
+  renderCsvDrafts();
+  renderCsvTimezoneSelect();
+  renderCsvTimes();
   renderSchedules();
   renderScheduleCalendar();
 }
