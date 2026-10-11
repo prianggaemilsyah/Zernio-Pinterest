@@ -229,6 +229,9 @@ textarea { resize: vertical; }
 .modal-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
 .modal-text { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 0; }
 .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+.dup-badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-height: 260px; overflow-y: auto; margin-top: 14px; }
+.dup-badge { display: inline-block; max-width: 100%; padding: 5px 10px; background: rgba(240,40,73,0.12); border: 1px solid rgba(240,40,73,0.45); border-radius: 999px; font-size: 12px; color: var(--red); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dup-modal-hint { margin-top: 14px; font-size: 11px; }
 
 /* Mass upload / product list */
 .mtab-btn { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
@@ -280,6 +283,7 @@ textarea { resize: vertical; }
 .csv-warning { margin: 0 0 16px; padding: 12px 14px; background: rgba(247,185,40,0.10); border: 1px solid var(--yellow); border-left: 4px solid var(--yellow); border-radius: 8px; font-size: 12px; line-height: 1.55; color: var(--text2); }
 .csv-warning strong { color: var(--yellow); }
 .csv-warning code { background: var(--bg3); padding: 1px 4px; border-radius: 4px; color: var(--text); }
+.csv-issue-list { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 11px; color: var(--text2); line-height: 1.6; }
 
 /* Master posting times */
 .mtimes-block { margin-top: 14px; }

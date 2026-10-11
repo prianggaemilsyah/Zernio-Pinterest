@@ -1191,6 +1191,110 @@ async function handleCsvJsonFile(file) {
 
 function clipText(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) : s; }
 
+// Collapse whitespace and trim (Pinterest is picky about stray spaces; titles max 100 chars).
+function csvClean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+
+// Pinterest requires every row to have a unique Title within one upload,
+// otherwise it rejects the duplicate with "Multiples rows with the same title".
+function uniqueCsvTitle(base, used) {
+  base = csvClean(base) || 'Produk';
+  let title = clipText(base, 100) || 'Produk';
+  let key = title.toLowerCase();
+  if (!used.has(key)) { used.add(key); return title; }
+  for (let k = 2; k < 100000; k++) {
+    const suffix = ` (${k})`;
+    const cand = (clipText(base, 100 - suffix.length).trimEnd() || 'Produk') + suffix;
+    key = cand.toLowerCase();
+    if (!used.has(key)) { used.add(key); return cand; }
+  }
+  return title;
+}
+
+// Pinterest only accepts Media URLs ending in .jpg/.jpeg/.png/.mp4.
+// Shopee's .webp is rejected, so we swap the extension to .jpg (CDN usually serves the same image).
+function csvMediaUrl(url) {
+  let u = String(url == null ? '' : url).trim();
+  const converted = /\.webp(?=[?#]|$)/i.test(u);
+  if (converted) u = u.replace(/\.webp(?=[?#]|$)/i, '.jpg');
+  return { url: u, converted };
+}
+
+function csvNowUtc() { return new Date().toISOString().slice(0, 19); }
+
+// Single source of truth: turns the current selection into CSV rows + a list of Pinterest risks.
+function buildCsvRows() {
+  const board = csvBoardName();
+  const per = parseInt((document.getElementById('csvPerDay') || {}).value) || 1;
+  const start = (document.getElementById('csvStartDate') || {}).value || '';
+  const kwEl = document.getElementById('csvKeywords');
+  const keywords = csvClean(kwEl ? kwEl.value : '');
+  const items = csvSourceItems();
+  const used = new Set();
+  const nowUtc = csvNowUtc();
+  const issues = { total: items.length, duplicateTitles: [], webpConverted: 0, missingMedia: 0, badMedia: 0, emptyLink: 0, badLink: 0, pastDate: 0 };
+  const rows = items.map((p, i) => {
+    const base = p.nama_produk || p.title || '';
+    const clipped = clipText(csvClean(base), 100) || 'Produk';
+    const isDup = used.has(clipped.toLowerCase());
+    const title = uniqueCsvTitle(base, used);
+    if (isDup) issues.duplicateTitles.push(clipped);
+
+    const mediaInfo = csvMediaUrl((p.images && p.images[0]) || p.image || '');
+    if (mediaInfo.converted) issues.webpConverted++;
+    const media = mediaInfo.url;
+    if (!media) issues.missingMedia++;
+    else if (!/\.(jpe?g|png|mp4)(?=[?#]|$)/i.test(media)) issues.badMedia++;
+
+    const desc = clipText(csvClean(p.description || p.nama_produk || p.title || ''), 500);
+    const link = csvClean(p.link_komisi || p.link_produk || p.affiliateLink || p.productLink || '');
+    if (!link) issues.emptyLink++;
+    else if (!/^https?:\/\//i.test(link)) issues.badLink++;
+
+    const pub = start ? csvPublishDate(start, per, i) : '';
+    if (pub && pub < nowUtc) issues.pastDate++;
+
+    return [title, media, board, '', desc, link, pub, keywords];
+  });
+  return { rows, issues };
+}
+
+function csvIssueSummary(issues) {
+  if (!issues) return '';
+  const parts = [];
+  if (issues.duplicateTitles.length) parts.push(`${issues.duplicateTitles.length} judul duplikat dibuat unik`);
+  if (issues.webpConverted) parts.push(`${issues.webpConverted} gambar .webp \u2192 .jpg`);
+  if (issues.missingMedia) parts.push(`${issues.missingMedia} tanpa gambar`);
+  if (issues.badMedia) parts.push(`${issues.badMedia} media tak didukung`);
+  if (issues.emptyLink) parts.push(`${issues.emptyLink} tanpa link`);
+  if (issues.badLink) parts.push(`${issues.badLink} link tidak valid`);
+  if (issues.pastDate) parts.push(`${issues.pastDate} tanggal lampau`);
+  return parts.join(' \u2022 ');
+}
+
+function renderCsvIssues(issues) {
+  const el = document.getElementById('csvIssues');
+  if (!el) return;
+  if (!issues || !issues.total) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const msgs = [];
+  if (issues.duplicateTitles.length) msgs.push(`<b>${issues.duplicateTitles.length}</b> judul duplikat otomatis dibuat unik (ditambah "(2)", "(3)"\u2026) agar tidak ditolak Pinterest`);
+  if (issues.webpConverted) msgs.push(`<b>${issues.webpConverted}</b> gambar .webp diubah ekstensi ke .jpg (Pinterest menolak .webp)`);
+  if (issues.missingMedia) msgs.push(`<b>${issues.missingMedia}</b> baris tanpa Media URL \u2014 akan ditolak Pinterest`);
+  if (issues.badMedia) msgs.push(`<b>${issues.badMedia}</b> Media URL bukan .jpg/.jpeg/.png/.mp4 \u2014 akan ditolak Pinterest`);
+  if (issues.emptyLink) msgs.push(`<b>${issues.emptyLink}</b> baris tanpa Link`);
+  if (issues.badLink) msgs.push(`<b>${issues.badLink}</b> Link tidak diawali http(s)`);
+  if (issues.pastDate) msgs.push(`<b>${issues.pastDate}</b> Publish date sudah lewat \u2014 Pinterest akan publish segera`);
+  if (issues.total > 200) msgs.push(`<b>${issues.total}</b> baris melebihi batas 200/upload Pinterest \u2014 file akan dipecah otomatis`);
+  if (!msgs.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  let html = `<strong>Perhatian ekspor:</strong><br>` + msgs.map(m => '\u2022 ' + m).join('<br>');
+  if (issues.duplicateTitles.length) {
+    const shown = issues.duplicateTitles.slice(0, 5).map(t => '\u2022 ' + escapeHtml(truncateTitle(t, 60)));
+    if (issues.duplicateTitles.length > 5) shown.push(`\u2026 dan ${issues.duplicateTitles.length - 5} lainnya`);
+    html += `<div class="csv-issue-list">${shown.join('<br>')}</div>`;
+  }
+  el.innerHTML = html;
+  el.style.display = 'block';
+}
+
 function csvBoardName() {
   const sel = document.getElementById('csvBoard');
   if (sel && sel.value) {
@@ -1245,7 +1349,7 @@ function renderCsvPreview() {
   if (!btn) return;
   const items = csvSourceItems();
   btn.disabled = !items.length;
-  if (!items.length) { prev.textContent = 'Belum ada file diunggah.'; updateCsvEndDate(); return; }
+  if (!items.length) { prev.textContent = 'Belum ada file diunggah.'; renderCsvIssues(null); updateCsvEndDate(); return; }
   const src = selectedCsvDraftIds.size ? `${selectedCsvDraftIds.size} draft terpilih`
     : selectedCsvProductIds.size ? `${selectedCsvProductIds.size} produk terpilih`
     : csvProducts.length ? `${csvProducts.length} produk`
@@ -1258,39 +1362,44 @@ function renderCsvPreview() {
   parts.push('board: ' + (csvBoardName() || '(belum dipilih!)'));
   parts.push(`${per}/hari @ ${csvEffectiveTimes(per).join(', ')} ${tz.label.match(/\(([^)]+)\)/)?.[1] || tz.id}`);
   prev.textContent = parts.join(' \u2022 ');
+  renderCsvIssues(buildCsvRows().issues);
   updateCsvEndDate();
 }
 
 function buildCsv() {
-  const board = csvBoardName();
-  const per = parseInt(document.getElementById('csvPerDay').value) || 1;
-  const start = document.getElementById('csvStartDate').value;
-  const keywords = document.getElementById('csvKeywords').value.trim();
-  const lines = [CSV_COLUMNS.join(',')];
-  csvSourceItems().forEach((p, i) => {
-    const title = clipText(p.nama_produk || p.title || '', 100);
-    const media = (p.images && p.images[0]) || p.image || '';
-    const desc = clipText(p.description || p.nama_produk || p.title || '', 500);
-    const link = p.link_komisi || p.link_produk || p.affiliateLink || p.productLink || '';
-    const pub = start ? csvPublishDate(start, per, i) : '';
-    lines.push([title, media, board, '', desc, link, pub, keywords].map(csvEscape).join(','));
-  });
-  return lines.join('\r\n') + '\r\n';
+  const { rows } = buildCsvRows();
+  return [CSV_COLUMNS.join(',')].concat(rows.map(r => r.map(csvEscape).join(','))).join('\r\n') + '\r\n';
+}
+
+// Pinterest bulk upload caps at 200 rows per file: export one file, or split into "1ofN" parts.
+function csvDownload(content, filename) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function generateCsvFile() {
   const items = csvSourceItems();
   if (!items.length) { toast('Unggah file JSON atau pilih draft dulu', 'error'); return; }
   if (!csvBoardName()) { toast('Pilih board tujuan dulu', 'error'); return; }
+  const { rows, issues } = buildCsvRows();
   const unix = Math.floor(Date.now() / 1000);
-  const filename = `shopee_${unix}.csv`;
-  const blob = new Blob([buildCsv()], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-  toast(`CSV dibuat: ${filename} (${items.length} baris)`, 'success');
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += 200) chunks.push(rows.slice(i, i + 200));
+  chunks.forEach((chunk, idx) => {
+    const content = [CSV_COLUMNS.join(',')].concat(chunk.map(r => r.map(csvEscape).join(','))).join('\r\n') + '\r\n';
+    const filename = chunks.length > 1 ? `shopee_${unix}_${idx + 1}of${chunks.length}.csv` : `shopee_${unix}.csv`;
+    csvDownload(content, filename);
+  });
+  renderCsvIssues(issues);
+  const extra = csvIssueSummary(issues);
+  const base = chunks.length > 1
+    ? `CSV dibuat: ${chunks.length} file (${rows.length} baris, dipecah per 200)`
+    : `CSV dibuat: shopee_${unix}.csv (${rows.length} baris)`;
+  toast(extra ? `${base} \u2022 ${extra}` : base, 'success');
 }
 
 // ===== Export CSV: products + drafts =====
@@ -1322,17 +1431,15 @@ function renderCsvDrafts() {
 async function csvSaveSelectedToDrafts() {
   if (!selectedCsvProductIds.size) { toast('Pilih produk dulu', 'error'); return; }
   const items = csvProducts.filter(p => selectedCsvProductIds.has(p._id));
-  try {
-    const r = await fetch('/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
-    const d = await r.json();
-    storeData.drafts = d.drafts || storeData.drafts;
-  } catch (e) { toast('Gagal menyimpan draft: ' + e.message, 'error'); return; }
+  const res = await saveItemsAsDrafts(items);
+  if (!res.ok) { renderCsvProducts(); renderCsvDrafts(); return; }
   selectedCsvProductIds.clear();
   const sa = document.getElementById('csvSelectAllProducts'); if (sa) sa.checked = false;
   renderCsvProducts();
   renderCsvDrafts();
+  renderDrafts();
   const dtab = document.querySelector('.mtab-btn[data-ctab="drafts"]'); if (dtab) dtab.click();
-  toast(`${items.length} produk disimpan ke draft`, 'success');
+  toast(`${res.added} produk disimpan ke draft${res.deleted ? `, ${res.deleted} duplikat lama dihapus` : ''}`, 'success');
 }
 
 function csvRemoveSelectedProducts() {
@@ -1517,17 +1624,101 @@ function updateDraftEndDate() {
     selectedDraftIds.size);
 }
 
-async function saveSelectedToDrafts() {
-  const items = parsedProducts.filter(p => selectedProductIds.has(p._id));
-  if (!items.length) { toast('Pilih produk dulu', 'error'); return; }
+// Key that identifies the same product across raw JSON items and stored drafts.
+function draftDedupeKey(it) {
+  const pid = String((it && (it.productId || it.product_id)) || '').trim().toLowerCase();
+  if (pid) return 'pid:' + pid;
+  const title = String((it && (it.title || it.nama_produk)) || '').trim().toLowerCase();
+  return title ? 'title:' + title : '';
+}
+
+// Drafts that already contain an item with the same key as one of `items`.
+function findDraftDuplicates(items) {
+  const byKey = new Map();
+  (storeData.drafts || []).forEach(d => {
+    const k = draftDedupeKey(d);
+    if (k && !byKey.has(k)) byKey.set(k, d);
+  });
+  const dups = [];
+  const seen = new Set();
+  items.forEach(it => {
+    const k = draftDedupeKey(it);
+    if (!k || !byKey.has(k)) return;
+    const d = byKey.get(k);
+    if (seen.has(d.id)) return;
+    seen.add(d.id);
+    dups.push(d);
+  });
+  return dups;
+}
+
+// Truncate a product title to a constant length, ending with an ellipsis.
+const DUP_TITLE_MAX = 22;
+function truncateTitle(t, n = DUP_TITLE_MAX) {
+  t = String(t == null ? '' : t).trim();
+  if (!t) return '(tanpa judul)';
+  return t.length > n ? t.slice(0, n).trimEnd() + '\u2026' : t;
+}
+
+// Show the duplicate-drafts modal; resolves true if the user confirms deletion.
+function confirmDuplicateDrafts(dups) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('dupModal');
+    document.getElementById('dupModalMsg').textContent =
+      `${dups.length} produk sudah ada di draft. Hapus data lama tersebut agar bisa dimasukkan?`;
+    document.getElementById('dupBadges').innerHTML =
+      dups.map(d => `<span class="dup-badge" title="${escapeHtml(d.title || d.productId || '')}">${escapeHtml(truncateTitle(d.title || d.productId))}</span>`).join('');
+    const finish = (val) => { modal.style.display = 'none'; cleanup(); resolve(val); };
+    const onCancel = () => finish(false);
+    const onConfirm = () => finish(true);
+    const onOverlay = e => { if (e.target === modal) finish(false); };
+    function cleanup() {
+      document.getElementById('btnDupCancel').removeEventListener('click', onCancel);
+      document.getElementById('btnDupConfirm').removeEventListener('click', onConfirm);
+      modal.removeEventListener('click', onOverlay);
+    }
+    document.getElementById('btnDupCancel').addEventListener('click', onCancel);
+    document.getElementById('btnDupConfirm').addEventListener('click', onConfirm);
+    modal.addEventListener('click', onOverlay);
+    modal.style.display = 'flex';
+  });
+}
+
+// Save `items` into drafts, forcing the user to delete existing duplicates first.
+async function saveItemsAsDrafts(items) {
+  const dups = findDraftDuplicates(items);
+  if (dups.length) {
+    const ok = await confirmDuplicateDrafts(dups);
+    if (!ok) {
+      toast('Dibatalkan: hapus draft duplikat terlebih dahulu', 'error');
+      return { ok: false, deleted: 0, added: 0 };
+    }
+    try {
+      const rd = await fetch('/api/drafts/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: dups.map(d => d.id) }) });
+      const dd = await rd.json();
+      storeData.drafts = dd.drafts || storeData.drafts;
+    } catch (e) { toast('Gagal menghapus duplikat: ' + e.message, 'error'); return { ok: false, deleted: 0, added: 0 }; }
+  }
   try {
     const r = await fetch('/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    toast(`Ditambahkan ${d.added} draft${d.skipped ? `, ${d.skipped} duplikat dilewati` : ''}`, 'success');
-    await loadStore();
-    renderDrafts();
-  } catch(e) { toast('Gagal: ' + e.message, 'error'); }
+    storeData.drafts = d.drafts || storeData.drafts;
+    return { ok: true, deleted: dups.length, added: d.added };
+  } catch (e) { toast('Gagal menyimpan draft: ' + e.message, 'error'); return { ok: false, deleted: 0, added: 0 }; }
+}
+
+async function saveSelectedToDrafts() {
+  const items = parsedProducts.filter(p => selectedProductIds.has(p._id));
+  if (!items.length) { toast('Pilih produk dulu', 'error'); return; }
+  const res = await saveItemsAsDrafts(items);
+  if (!res.ok) { renderDrafts(); renderCsvDrafts(); return; }
+  selectedProductIds.clear();
+  const sa = document.getElementById('selectAllProducts'); if (sa) sa.checked = false;
+  renderProducts();
+  renderDrafts();
+  renderCsvDrafts();
+  toast(`Ditambahkan ${res.added} draft${res.deleted ? `, ${res.deleted} duplikat lama dihapus` : ''}`, 'success');
 }
 
 function removeSelectedProducts() {

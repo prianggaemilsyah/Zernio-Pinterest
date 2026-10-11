@@ -424,6 +424,8 @@
             <div class="mtimes-hint" id="csvTimesHint"></div>
           </div>
 
+          <div class="csv-warning" id="csvIssues" style="display:none"></div>
+
           <div class="form-actions">
             <button class="btn btn-primary" id="btnGenerateCsv" disabled>Buat &amp; Unduh CSV</button>
             <span id="csvPreview" style="font-size:12px;color:var(--text2);margin-left:8px"></span>
@@ -607,6 +609,21 @@
           <div class="modal-actions">
             <button class="btn btn-primary" id="btnDetailPublish">Publish ke Zernio</button>
             <button class="btn btn-secondary" onclick="closeScheduleDetail()">Tutup</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Duplicate Draft Modal -->
+      <div class="modal-overlay" id="dupModal" style="display:none">
+        <div class="modal-card" style="max-width:520px">
+          <div class="modal-icon danger">&#9888;</div>
+          <h3>Produk Duplikat</h3>
+          <p class="modal-text" id="dupModalMsg"></p>
+          <div class="dup-badges" id="dupBadges"></div>
+          <p class="modal-text dup-modal-hint">Data draft lama yang duplikat akan dihapus, lalu dimasukkan kembali.</p>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" id="btnDupCancel">Batal</button>
+            <button class="btn btn-primary" id="btnDupConfirm">Hapus &amp; Masukkan</button>
           </div>
         </div>
       </div>
